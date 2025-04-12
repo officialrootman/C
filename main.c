@@ -3,10 +3,37 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <time.h>
 
 #define PORT 8080
 
+// Rastgele sahte hata mesajları
+const char *fake_errors[] = {
+    "Sunucu hatası: Yetersiz bellek!",
+    "Bağlantı zaman aşımına uğradı. Lütfen tekrar deneyin.",
+    "Yetkilendirme başarısız. Geçersiz kimlik bilgileri.",
+    "Veritabanı bağlantısı kurulamadı.",
+    "502 Bad Gateway. Proxy sunucu hatası.",
+    "Sistemde olağan dışı bir durum algılandı.",
+};
+
+// Rastgele gecikme oluşturma fonksiyonu
+void random_delay() {
+    int delay = rand() % 5 + 1; // 1 ile 5 saniye arasında rastgele gecikme
+    sleep(delay);
+}
+
+// Sahte mesaj gönderme fonksiyonu
+void send_fake_message(int socket) {
+    int random_index = rand() % (sizeof(fake_errors) / sizeof(fake_errors[0]));
+    const char *message = fake_errors[random_index];
+    send(socket, message, strlen(message), 0);
+    send(socket, "\n", 1, 0);
+}
+
 int main() {
+    srand(time(NULL)); // Rastgelelik için zaman tabanlı seed
+
     int server_fd, new_socket;
     struct sockaddr_in address;
     int addrlen = sizeof(address);
@@ -46,10 +73,16 @@ int main() {
         char *client_ip = inet_ntoa(address.sin_addr);
         printf("Yeni bağlantı: %s\n", client_ip);
 
-        // Saldırganı yanıltıcı mesaj gönder
-        char *message = "Sunucu hatası! Lütfen daha sonra tekrar deneyin.\n";
-        send(new_socket, message, strlen(message), 0);
+        // Rastgele gecikme
+        random_delay();
 
+        // Sahte hata mesajı gönder
+        for (int i = 0; i < 3; i++) { // Saldırganı daha da yanıltmak için 3 farklı sahte mesaj
+            send_fake_message(new_socket);
+            random_delay();
+        }
+
+        // Bağlantıyı kapat
         close(new_socket);
     }
 
