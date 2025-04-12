@@ -2,158 +2,209 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include <netdb.h>
-#include <errno.h>
-#include <time.h>
+#include <netinet/in.h>
+#include <pthread.h>
 
-#define MIN_PORT 1
-#define MAX_PORT 65535
-#define TIMEOUT_SECONDS 1
-#define MAX_INPUT_LENGTH 256
+#define MAX_PORTS 10
+#define BUFFER_SIZE 4096
+#define MAX_CONNECTIONS 50
 
-// ANSI color codes
-#define ANSI_COLOR_RED     "\x1b[31m"
-#define ANSI_COLOR_GREEN   "\x1b[32m"
-#define ANSI_COLOR_YELLOW  "\x1b[33m"
-#define ANSI_COLOR_BLUE    "\x1b[34m"
-#define ANSI_COLOR_MAGENTA "\x1b[35m"
-#define ANSI_COLOR_CYAN    "\x1b[36m"
-#define ANSI_COLOR_RESET   "\x1b[0m"
+// ANSI Color codes for better visualization
+#define RED     "\x1b[31m"
+#define GREEN   "\x1b[32m"
+#define YELLOW  "\x1b[33m"
+#define BLUE    "\x1b[34m"
+#define MAGENTA "\x1b[35m"
+#define CYAN    "\x1b[36m"
+#define RESET   "\x1b[0m"
+
+typedef struct {
+    int port;
+    char *service_name;
+} Port_Service;
+
+Port_Service monitored_ports[] = {
+    {21, "FTP"},
+    {22, "SSH"},
+    {23, "Telnet"},
+    {25, "SMTP"},
+    {80, "HTTP"},
+    {443, "HTTPS"},
+    {3306, "MySQL"},
+    {5432, "PostgreSQL"},
+    {8080, "HTTP-Alt"},
+    {27017, "MongoDB"}
+};
+
+volatile sig_atomic_t running = 1;
 
 void print_banner() {
-    printf(ANSI_COLOR_CYAN);
-    printf("╔════════════════════════════════════════════╗\n");
-    printf("║        Advanced Port Scanner v2.0          ║\n");
-    printf("║        Created by: officialrootman        ║\n");
-    printf("║     IP & Domain Scanner - Ethical Only!    ║\n");
-    printf("╚════════════════════════════════════════════╝\n");
-    printf(ANSI_COLOR_RESET);
+    printf(CYAN);
+    printf("╔═══════════════════════════════════════════╗\n");
+    printf("║          Terminal HoneyPot v1.0          ║\n");
+    printf("║       Created by: officialrootman       ║\n");
+    printf("║      Real-time Attack Monitoring        ║\n");
+    printf("╚═══════════════════════════════════════════╝\n");
+    printf(RESET);
 }
 
-// Function to resolve domain name to IP
-char* resolve_domain(const char* domain) {
-    struct hostent *host_info;
-    struct in_addr **addr_list;
+void handle_signal(int sig) {
+    running = 0;
+    printf(YELLOW "\n[*] Shutting down honeypot...\n" RESET);
+}
+
+void print_timestamp() {
+    time_t now;
+    time(&now);
+    char *date = ctime(&now);
+    date[strlen(date) - 1] = '\0';  // Remove newline
+    printf("[%s] ", date);
+}
+
+void *handle_connection(void *socket_desc) {
+    int sock = *(int*)socket_desc;
+    int port = monitored_ports[sock % MAX_PORTS].port;
+    char buffer[BUFFER_SIZE];
+    char client_ip[INET_ADDRSTRLEN];
+    struct sockaddr_in addr;
+    socklen_t addr_size = sizeof(addr);
     
-    if ((host_info = gethostbyname(domain)) == NULL) {
-        printf(ANSI_COLOR_RED "Failed to resolve domain: %s\n" ANSI_COLOR_RESET, domain);
-        return NULL;
+    getpeername(sock, (struct sockaddr*)&addr, &addr_size);
+    inet_ntop(AF_INET, &addr.sin_addr, client_ip, sizeof(client_ip));
+    
+    print_timestamp();
+    printf(GREEN "[+] New connection from %s to port %d (%s)\n" RESET, 
+           client_ip, port, monitored_ports[sock % MAX_PORTS].service_name);
+
+    // Receive data
+    ssize_t read_size;
+    while ((read_size = recv(sock, buffer, BUFFER_SIZE - 1, 0)) > 0) {
+        buffer[read_size] = '\0';
+        print_timestamp();
+        printf(RED "[!] Received data on port %d (%s) from %s:\n" RESET, 
+               port, monitored_ports[sock % MAX_PORTS].service_name, client_ip);
+        printf(MAGENTA "%s\n" RESET, buffer);
+
+        // Send honeypot response
+        char response[BUFFER_SIZE];
+        snprintf(response, sizeof(response), 
+                "Welcome to %s service. This connection is being monitored.\n", 
+                monitored_ports[sock % MAX_PORTS].service_name);
+        send(sock, response, strlen(response), 0);
     }
+
+    print_timestamp();
+    printf(BLUE "[-] Connection closed from %s on port %d\n" RESET, client_ip, port);
     
-    addr_list = (struct in_addr **)host_info->h_addr_list;
-    if (addr_list[0] != NULL) {
-        return inet_ntoa(*addr_list[0]);
-    }
-    
+    close(sock);
+    free(socket_desc);
     return NULL;
 }
 
-void scan_port(const char* target, int port) {
-    struct sockaddr_in addr;
-    int sock;
-    struct timeval timeout;
-    
-    sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
-        return;
+int create_socket(int port) {
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == -1) {
+        printf(RED "Failed to create socket for port %d\n" RESET, port);
+        return -1;
     }
-    
-    // Set timeout
-    timeout.tv_sec = TIMEOUT_SECONDS;
-    timeout.tv_usec = 0;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
-    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
-    
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = inet_addr(target);
-    
-    if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
-        // Get service name if available
-        struct servent *service = getservbyport(htons(port), "tcp");
-        if (service != NULL) {
-            printf(ANSI_COLOR_GREEN "[+] Port %d is open - Service: %s" ANSI_COLOR_RESET "\n", 
-                   port, service->s_name);
-        } else {
-            printf(ANSI_COLOR_GREEN "[+] Port %d is open" ANSI_COLOR_RESET "\n", port);
-        }
-    }
-    
-    close(sock);
-}
 
-void perform_scan(const char* target, int start_port, int end_port) {
-    printf(ANSI_COLOR_YELLOW "\nStarting scan on target: %s\n" ANSI_COLOR_RESET, target);
-    printf("Port range: %d-%d\n\n", start_port, end_port);
-    
-    time_t scan_start = time(NULL);
-    
-    for (int port = start_port; port <= end_port; port++) {
-        printf("\rScanning port %d... ", port);
-        fflush(stdout);
-        scan_port(target, port);
+    int opt = 1;
+    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        printf(RED "setsockopt failed for port %d\n" RESET, port);
+        return -1;
     }
-    
-    time_t scan_end = time(NULL);
-    double scan_time = difftime(scan_end, scan_start);
-    
-    printf(ANSI_COLOR_YELLOW "\nScan completed in %.2f seconds\n" ANSI_COLOR_RESET, scan_time);
+
+    struct sockaddr_in server;
+    server.sin_family = AF_INET;
+    server.sin_addr.s_addr = INADDR_ANY;
+    server.sin_port = htons(port);
+
+    if (bind(sock, (struct sockaddr*)&server, sizeof(server)) < 0) {
+        printf(RED "Bind failed for port %d\n" RESET, port);
+        return -1;
+    }
+
+    listen(sock, MAX_CONNECTIONS);
+    return sock;
 }
 
 int main() {
-    char target[MAX_INPUT_LENGTH];
-    int choice, start_port, end_port;
-    
+    signal(SIGINT, handle_signal);
     print_banner();
-    
-    printf(ANSI_COLOR_YELLOW "\nSelect scan type:\n" ANSI_COLOR_RESET);
-    printf("1. IP Address Scan\n");
-    printf("2. Domain Name Scan\n");
-    printf("Choice (1 or 2): ");
-    scanf("%d", &choice);
-    getchar(); // Clear newline
-    
-    if (choice != 1 && choice != 2) {
-        printf(ANSI_COLOR_RED "Invalid choice. Exiting...\n" ANSI_COLOR_RESET);
-        return 1;
-    }
-    
-    // Get target
-    if (choice == 1) {
-        printf("Enter IP address to scan: ");
-    } else {
-        printf("Enter domain name to scan (e.g., example.com): ");
-    }
-    fgets(target, MAX_INPUT_LENGTH, stdin);
-    target[strcspn(target, "\n")] = 0; // Remove newline
-    
-    // Get port range
-    printf("Enter start port (1-65535): ");
-    scanf("%d", &start_port);
-    printf("Enter end port (1-65535): ");
-    scanf("%d", &end_port);
-    
-    // Validate port range
-    if (start_port < MIN_PORT || end_port > MAX_PORT || start_port > end_port) {
-        printf(ANSI_COLOR_RED "Error: Invalid port range. Use ports between 1-65535\n" ANSI_COLOR_RESET);
-        return 1;
-    }
-    
-    char* scan_target = target;
-    if (choice == 2) {
-        // Resolve domain name
-        printf(ANSI_COLOR_BLUE "\nResolving domain name...\n" ANSI_COLOR_RESET);
-        scan_target = resolve_domain(target);
-        if (scan_target == NULL) {
-            printf(ANSI_COLOR_RED "Failed to resolve domain. Exiting...\n" ANSI_COLOR_RESET);
-            return 1;
+
+    int server_sockets[MAX_PORTS];
+    fd_set readfds;
+    int max_sd = 0;
+
+    // Initialize server sockets
+    for (int i = 0; i < MAX_PORTS; i++) {
+        server_sockets[i] = create_socket(monitored_ports[i].port);
+        if (server_sockets[i] > max_sd) {
+            max_sd = server_sockets[i];
         }
-        printf(ANSI_COLOR_GREEN "Domain resolved to IP: %s\n" ANSI_COLOR_RESET, scan_target);
     }
-    
-    perform_scan(scan_target, start_port, end_port);
-    
+
+    printf(GREEN "\n[*] Honeypot is running. Monitoring following ports:\n" RESET);
+    for (int i = 0; i < MAX_PORTS; i++) {
+        if (server_sockets[i] != -1) {
+            printf(YELLOW "    → Port %d (%s)\n" RESET, 
+                   monitored_ports[i].port, monitored_ports[i].service_name);
+        }
+    }
+    printf(GREEN "\n[*] Press Ctrl+C to stop the honeypot\n\n" RESET);
+
+    while (running) {
+        FD_ZERO(&readfds);
+        for (int i = 0; i < MAX_PORTS; i++) {
+            if (server_sockets[i] != -1) {
+                FD_SET(server_sockets[i], &readfds);
+            }
+        }
+
+        struct timeval timeout;
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
+
+        int activity = select(max_sd + 1, &readfds, NULL, NULL, &timeout);
+        
+        if (activity < 0 && errno != EINTR) {
+            printf(RED "Select error\n" RESET);
+            continue;
+        }
+
+        for (int i = 0; i < MAX_PORTS; i++) {
+            if (server_sockets[i] != -1 && FD_ISSET(server_sockets[i], &readfds)) {
+                struct sockaddr_in client;
+                socklen_t client_len = sizeof(client);
+                int *new_sock = malloc(sizeof(int));
+                *new_sock = accept(server_sockets[i], (struct sockaddr*)&client, &client_len);
+                
+                if (*new_sock < 0) {
+                    free(new_sock);
+                    continue;
+                }
+
+                pthread_t thread_id;
+                if (pthread_create(&thread_id, NULL, handle_connection, (void*)new_sock) < 0) {
+                    printf(RED "Could not create thread\n" RESET);
+                    free(new_sock);
+                    continue;
+                }
+                pthread_detach(thread_id);
+            }
+        }
+    }
+
+    // Cleanup
+    for (int i = 0; i < MAX_PORTS; i++) {
+        if (server_sockets[i] != -1) {
+            close(server_sockets[i]);
+        }
+    }
+
     return 0;
 }
