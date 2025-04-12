@@ -1,83 +1,65 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
 
-#define LOG_FILE "honeypot.log"
-#define PORT 22  // SSH port'unu simüle ediyoruz
+#define BUFFER_SIZE 65536
+#define LOG_FILE "ids.log"
 
-void log_attempt(const char* ip, const char* timestamp) {
-    FILE* log = fopen(LOG_FILE, "a");
+// Function to log suspicious activity
+void log_suspicious_activity(const char *message, const char *ip) {
+    FILE *log = fopen(LOG_FILE, "a");
     if (log != NULL) {
-        fprintf(log, "[%s] Bağlantı denemesi - IP: %s\n", timestamp, ip);
+        fprintf(log, "Suspicious activity detected from IP: %s - %s\n", ip, message);
         fclose(log);
+    } else {
+        perror("Failed to open log file");
     }
 }
 
-char* get_timestamp() {
-    time_t now = time(NULL);
-    return strtok(ctime(&now), "\n");
+// Function to analyze packet data
+void analyze_packet(const char *data, int size, const char *ip) {
+    // Check for suspicious patterns (example: "malicious" keyword)
+    if (strstr(data, "malicious") != NULL) {
+        log_suspicious_activity("Keyword 'malicious' found in packet data", ip);
+        printf("Alert: Suspicious activity detected from IP %s\n", ip);
+    }
 }
 
 int main() {
-    int server_fd, client_fd;
-    struct sockaddr_in address;
-    int addrlen = sizeof(address);
-    
-    // Socket oluştur
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
-        perror("Socket oluşturulamadı");
+    int raw_socket;
+    struct sockaddr_in source_addr;
+    socklen_t addr_len = sizeof(source_addr);
+    char buffer[BUFFER_SIZE];
+
+    // Create a raw socket
+    raw_socket = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
+    if (raw_socket < 0) {
+        perror("Socket creation failed");
         exit(EXIT_FAILURE);
     }
-    
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);
-    
-    // Socket'i bağla
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        perror("Bind başarısız");
-        exit(EXIT_FAILURE);
-    }
-    
-    // Dinlemeye başla
-    if (listen(server_fd, 10) < 0) {
-        perror("Listen başarısız");
-        exit(EXIT_FAILURE);
-    }
-    
-    printf("Honeypot %d portunda çalışıyor...\n", PORT);
-    
-    while(1) {
-        // Bağlantıları kabul et
-        if ((client_fd = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
-            perror("Accept başarısız");
+
+    printf("IDS is running and monitoring network traffic...\n");
+
+    while (1) {
+        // Receive packets
+        int data_size = recvfrom(raw_socket, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&source_addr, &addr_len);
+        if (data_size < 0) {
+            perror("Failed to receive packets");
             continue;
         }
-        
-        // Bağlanan IP'yi al
-        char client_ip[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &(address.sin_addr), client_ip, INET_ADDRSTRLEN);
-        
-        // Zaman damgasını al
-        char* timestamp = get_timestamp();
-        
-        // Bağlantı denemesini kaydet
-        log_attempt(client_ip, timestamp);
-        
-        printf("Bağlantı algılandı - IP: %s\n", client_ip);
-        
-        // Sahte SSH banner gönder
-        char banner[] = "SSH-2.0-OpenSSH_8.2p1 Ubuntu-4ubuntu0.2\n";
-        send(client_fd, banner, strlen(banner), 0);
-        
-        // Bağlantıyı kapat
-        close(client_fd);
+
+        // Convert source IP to human-readable format
+        char source_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &(source_addr.sin_addr), source_ip, INET_ADDRSTRLEN);
+
+        // Analyze the packet data
+        analyze_packet(buffer, data_size, source_ip);
     }
-    
+
+    // Close the socket (not reached in this infinite loop)
+    close(raw_socket);
     return 0;
 }
