@@ -1,39 +1,47 @@
-#include <pcap.h>
 #include <stdio.h>
-#include <arpa/inet.h>
+#include <string.h>
+#include <openssl/sha.h>
 
-void packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_char *packet) {
-    printf("Packet captured: Length = %d bytes\n", header->len);
-    for (int i = 0; i < header->len; i++) {
-        printf("%02x ", packet[i]);
-        if ((i + 1) % 16 == 0) printf("\n");
+// Örnek imza
+const char *virüs_imzası = "5d41402abc4b2a76b9719d911017c592"; // "hello" için md5 hash'i
+
+void dosya_tara(const char *dosya_adı) {
+    FILE *dosya = fopen(dosya_adı, "rb");
+    if (!dosya) {
+        printf("Dosya açılamadı: %s\n", dosya_adı);
+        return;
     }
-    printf("\n\n");
+
+    unsigned char buffer[1024];
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256_CTX sha256;
+    SHA256_Init(&sha256);
+
+    size_t okunan;
+    while ((okunan = fread(buffer, 1, sizeof(buffer), dosya)) > 0) {
+        SHA256_Update(&sha256, buffer, okunan);
+    }
+
+    SHA256_Final(hash, &sha256);
+    fclose(dosya);
+
+    char hash_string[SHA256_DIGEST_LENGTH * 2 + 1];
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        sprintf(&hash_string[i * 2], "%02x", hash[i]);
+    }
+    hash_string[SHA256_DIGEST_LENGTH * 2] = '\0';
+
+    printf("Dosya Hash'i: %s\n", hash_string);
+
+    if (strcmp(hash_string, virüs_imzası) == 0) {
+        printf("Virüs Tespit Edildi!\n");
+    } else {
+        printf("Dosya Temiz.\n");
+    }
 }
 
 int main() {
-    char *dev, errbuf[PCAP_ERRBUF_SIZE];
-    pcap_t *handle;
-
-    // Ağ cihazını seç
-    dev = pcap_lookupdev(errbuf);
-    if (dev == NULL) {
-        fprintf(stderr, "Device not found: %s\n", errbuf);
-        return 1;
-    }
-    printf("Device: %s\n", dev);
-
-    // Ağ cihazını aç
-    handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
-    if (handle == NULL) {
-        fprintf(stderr, "Could not open device %s: %s\n", dev, errbuf);
-        return 2;
-    }
-
-    // Paketleri yakala
-    printf("Starting packet capture...\n");
-    pcap_loop(handle, 0, packet_handler, NULL);
-
-    pcap_close(handle);
+    const char *dosya_adı = "test.txt";
+    dosya_tara(dosya_adı);
     return 0;
 }
