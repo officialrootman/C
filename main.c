@@ -1,108 +1,122 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <signal.h>
-#include <time.h>
 
-#define PORT 8080       // Dinlenecek port numarası (gerektiğinde değiştirilebilir)
-#define BUFFER_SIZE 1024
+// Global 3x3 tahta dizisi. Her hücre başlangıçta numaralandırılmış durumda.
+char board[3][3];
 
-// Programın düzgün kapanması için global bayrak
-volatile sig_atomic_t running = 1;
+// Tahtayı ilk durumuna getiren fonksiyon: 1'den 9'a kadar sayılarla doldurur.
+void initializeBoard() {
+    char pos = '1';
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            board[i][j] = pos++;
+        }
+    }
+}
 
-// SIGINT yakalayıcı: Ctrl+C ile çalışmayı sonlandırıyoruz.
-void handle_sigint(int signum) {
-    running = 0;
-    printf("\nSIGINT alındı. Honeypot kapatılıyor...\n");
+// Tahtayı ekrana güzel bir şekilde yazdıran fonksiyon.
+void displayBoard() {
+    printf("\n");
+    for (int i = 0; i < 3; i++) {
+        printf(" %c | %c | %c \n", board[i][0], board[i][1], board[i][2]);
+        if (i != 2)
+            printf("---|---|---\n");
+    }
+    printf("\n");
+}
+
+// Galip kontrolü yapan fonksiyon.
+// Eğer bir oyuncu kazanmışsa, o oyuncunun işaretini ('X' veya 'O') geri döndürür.
+// Hiçbir kazanan yoksa ' ' (boş karakter) döndürür.
+char checkWinner() {
+    // Satır kontrolü
+    for (int i = 0; i < 3; i++) {
+        if (board[i][0] == board[i][1] && board[i][1] == board[i][2])
+            return board[i][0];
+    }
+    // Sütun kontrolü
+    for (int j = 0; j < 3; j++) {
+        if (board[0][j] == board[1][j] && board[1][j] == board[2][j])
+            return board[0][j];
+    }
+    // Çapraz kontrolü
+    if (board[0][0] == board[1][1] && board[1][1] == board[2][2])
+        return board[0][0];
+    if (board[0][2] == board[1][1] && board[1][1] == board[2][0])
+        return board[0][2];
+
+    // Kazanan yoksa boş karakter döndürürüz.
+    return ' ';
+}
+
+// Tahtada hala hamle yapılabilecek boş hücre var mı kontrol eder.
+int isBoardFull() {
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            if (board[i][j] != 'X' && board[i][j] != 'O')
+                return 0; // Boş hücre bulundu.
+        }
+    }
+    return 1; // Tahta tamamen dolu.
 }
 
 int main() {
-    int server_fd, new_socket;
-    struct sockaddr_in address, client_addr;
-    int addrlen = sizeof(address);
+    int choice;
+    char winner = ' ';
+    char currentPlayer = 'X';
 
-    // SIGINT (Ctrl+C) sinyalini yakala
-    signal(SIGINT, handle_sigint);
-
-    // 1. Socket oluşturulması (TCP)
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
-        perror("Socket oluşturulurken hata oluştu");
-        exit(EXIT_FAILURE);
-    }
-
-    // 2. Socket seçenekleri: Adresin tekrar kullanılabilir olması
-    int opt = 1;
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
-        perror("setsockopt hatası");
-        exit(EXIT_FAILURE);
-    }
-
-    // 3. Adres ve port yapılandırması
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);
-
-    // 4. Bind: Socket'i belirtilen IP ve port'a bağlama
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        perror("Bind işlemi başarısız");
-        exit(EXIT_FAILURE);
-    }
-
-    printf("Honeypot port %d üzerinde çalışıyor. Bağlantılar bekleniyor...\n", PORT);
-
-    // 5. Dinleme: Gelen bağlantıları kabul etme
-    if (listen(server_fd, 3) < 0) {
-        perror("Dinleme sırasında hata");
-        exit(EXIT_FAILURE);
-    }
-
-    // 6. Sonsuz döngü: Gelen bağlantıları kabul et ve terminale yazdır
-    while(running) {
-        socklen_t client_addr_len = sizeof(client_addr);
-        new_socket = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-        if (new_socket < 0) {
-            // Eğer running bayrağı sıfırlanmışsa (Ctrl+C) döngüden çık.
-            if (!running)
-                break;
-            perror("Bağlantı kabul edilemedi");
+    // Oyun başlangıcında tahtayı hazırlıyoruz.
+    initializeBoard();
+    
+    // Oyun döngüsü: ya bir oyuncu kazanır ya da tahta dolarsa oyun sona erer.
+    while (1) {
+        displayBoard();
+        printf("Oyuncu %c, hamle yapmak için (1-9) bir hücre numarası girin: ", currentPlayer);
+        
+        if (scanf("%d", &choice) != 1) {
+            printf("Lütfen geçerli bir tamsayı giriniz!\n");
+            // Geçersiz girdiyi temizlemek için buffer'ı boşaltıyoruz
+            while (getchar() != '\n');
             continue;
         }
-
-        // Bağlantı anındaki zamanı al ve formatla
-        time_t now = time(NULL);
-        char time_str[26];
-        ctime_r(&now, time_str);
-        // Yeni satır karakterini kaldır
-        size_t len = strlen(time_str);
-        if (len > 0 && time_str[len - 1] == '\n')
-            time_str[len - 1] = '\0';
-
-        // Terminale bağlantı bilgisini yazdır
-        printf("\n[%s] Bağlantı: %s\n", time_str, inet_ntoa(client_addr.sin_addr));
-
-        // İstemciye hoşgeldiniz mesajı gönder
-        const char *welcome_msg = "Honeypot'a hoş geldiniz!\n";
-        send(new_socket, welcome_msg, strlen(welcome_msg), 0);
-
-        // İstemciden gelen veriyi oku
-        char buffer[BUFFER_SIZE] = {0};
-        int bytes_read = read(new_socket, buffer, BUFFER_SIZE);
-        if (bytes_read > 0) {
-            printf("Alınan veri: %s\n", buffer);
-        } else if (bytes_read < 0) {
-            perror("Veri okunurken hata oluştu");
+        
+        // Girilen değerin 1 ile 9 arasında olup olmadığını kontrol ediyoruz.
+        if (choice < 1 || choice > 9) {
+            printf("Geçersiz hücre seçimi! 1 ile 9 arasında bir sayı girmelisiniz.\n");
+            continue;
         }
-
-        // Bağlantıyı kapat
-        close(new_socket);
+        
+        // Kullanıcının girdiği sayı, tahtadaki karşılık gelen satır ve sütuna çevrilir.
+        int row = (choice - 1) / 3;
+        int col = (choice - 1) % 3;
+        
+        // Eğer seçilen hücrede zaten 'X' veya 'O' varsa, hamle geçersizdir.
+        if (board[row][col] == 'X' || board[row][col] == 'O') {
+            printf("Bu hücre dolu! Lütfen boş bir hücre seçin.\n");
+            continue;
+        }
+        
+        // Geçerli hamle yapılıyor.
+        board[row][col] = currentPlayer;
+        
+        // Hamleden sonra kazanan kontrol edilir.
+        winner = checkWinner();
+        if (winner == 'X' || winner == 'O') {
+            displayBoard();
+            printf("Tebrikler! Oyuncu %c kazandı!\n", winner);
+            break;
+        }
+        
+        // Tahta dolu ise oyun berabere biter.
+        if (isBoardFull()) {
+            displayBoard();
+            printf("Oyun berabere bitti!\n");
+            break;
+        }
+        
+        // Oyuncular sırayla hamle yapar. 'X' ise 'O', 'O' ise 'X'e geçiş yapılır.
+        currentPlayer = (currentPlayer == 'X') ? 'O' : 'X';
     }
-
-    // Server socket'ini kapat ve çık
-    close(server_fd);
-    printf("Honeypot kapatıldı.\n");
+    
     return 0;
 }
