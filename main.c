@@ -1,38 +1,39 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SIGNATURE "malware_signature"
+#define TARGET_PASSWORD "abc"  // Tahmin edilmesi gereken şifre
+#define MAX_LENGTH 3           // Şifrenin maksimum uzunluğu
 
-int check_file_for_malware(const char *file_path) {
-    FILE *file = fopen(file_path, "rb");
-    if (!file) {
-        perror("Dosya açılamadı");
-        return -1;
-    }
+// Karakter seti (örneğin, küçük harfler)
+const char charset[] = "abcdefghijklmnopqrstuvwxyz";
 
-    char buffer[256];
-    while (fread(buffer, 1, sizeof(buffer), file)) {
-        if (strstr(buffer, SIGNATURE)) {
-            fclose(file);
-            return 1; // Virüs bulundu
+// Bruteforce fonksiyonu
+void brute_force(char *attempt, int position, int max_length) {
+    if (position == max_length) {
+        // Şifrenin sonuna ulaşıldı, kontrol et
+        attempt[position] = '\0'; // Null terminator ekle
+        if (strcmp(attempt, TARGET_PASSWORD) == 0) {
+            printf("Şifre bulundu: %s\n", attempt);
         }
+        return;
     }
 
-    fclose(file);
-    return 0; // Temiz
+    // Karakter setindeki her karakteri dene
+    for (int i = 0; i < strlen(charset); i++) {
+        attempt[position] = charset[i];
+        brute_force(attempt, position + 1, max_length); // Rekürsif deneme
+    }
 }
 
 int main() {
-    const char *file_to_scan = "testfile.txt";
-    int result = check_file_for_malware(file_to_scan);
+    char attempt[MAX_LENGTH + 1]; // Şifre denemesi için buffer
+    printf("Brute force başlıyor...\n");
 
-    if (result == 1) {
-        printf("Virüs bulundu: %s\n", file_to_scan);
-    } else if (result == 0) {
-        printf("Dosya temiz: %s\n", file_to_scan);
-    } else {
-        printf("Tarama sırasında bir hata oluştu.\n");
+    // Şifrenin tüm uzunluklarını dene (1'den MAX_LENGTH'e kadar)
+    for (int length = 1; length <= MAX_LENGTH; length++) {
+        brute_force(attempt, 0, length);
     }
 
+    printf("Brute force tamamlandı.\n");
     return 0;
 }
