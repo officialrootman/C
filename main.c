@@ -1,13 +1,46 @@
-/* kernel.c */
-void kernel_main(void) {
-    const char *message = "Hello, World from C Kernel!";
-    char *video_memory = (char *)0xb8000;  // VGA text modu başlangıcı
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
-    // VGA ekranına yazdırma (her karakterin ardından bir attribute byte ekleniyor)
-    for (int i = 0; message[i] != '\0'; i++) {
-        video_memory[i * 2] = message[i];
-        video_memory[i * 2 + 1] = 0x07;  // Standart beyaz- siyah renk
+#define MAX_INPUT 1024
+
+int main() {
+    char input[MAX_INPUT];
+    char cwd[1024];
+
+    printf("Basit Terminal Emülatörü\n");
+    printf("Çıkmak için 'exit' yazın.\n");
+
+    while (1) {
+        // Geçerli dizini al
+        if (getcwd(cwd, sizeof(cwd)) != NULL) {
+            printf("%s > ", cwd);
+        } else {
+            perror("getcwd");
+            return 1;
+        }
+
+        // Kullanıcıdan input al
+        if (fgets(input, MAX_INPUT, stdin) == NULL) {
+            break;
+        }
+
+        // Yeni satır karakterini kaldır
+        input[strcspn(input, "\n")] = 0;
+
+        // 'exit' komutunu kontrol et
+        if (strcmp(input, "exit") == 0) {
+            printf("Çıkılıyor...\n");
+            break;
+        }
+
+        // Komutları çalıştır
+        int ret = system(input);
+        if (ret == -1) {
+            perror("Komut yürütüleme hatası");
+        }
     }
 
-    while (1);  // Sonsuz döngü, kernelin çalışmaya devam etmesini sağlar
+    return 0;
 }
