@@ -5,11 +5,39 @@
 
 #define MAX_INPUT 1024
 
+void execute_command(char *input) {
+    // Eğer kullanıcı 'git clone' komutunu girdiyse
+    if (strncmp(input, "git clone", 9) == 0) {
+        printf("[INFO] Git klonlama işlemi başlatılıyor...\n");
+        int ret = system(input);
+        if (ret == -1) {
+            perror("Git klonlama hatası");
+        }
+        return;
+    }
+
+    // Eğer kullanıcı 'pkg' komutunu girdiyse
+    if (strncmp(input, "pkg", 3) == 0) {
+        printf("[INFO] Paket yönetim komutu algılandı: %s\n", input);
+        int ret = system(input);
+        if (ret == -1) {
+            perror("Paket yönetim komutu hatası");
+        }
+        return;
+    }
+
+    // Diğer tüm komutlar için
+    int ret = system(input);
+    if (ret == -1) {
+        perror("Komut yürütüleme hatası");
+    }
+}
+
 int main() {
     char input[MAX_INPUT];
     char cwd[1024];
 
-    printf("Basit Terminal Emülatörü\n");
+    printf("Gelişmiş Terminal Emülatörü\n");
     printf("Çıkmak için 'exit' yazın.\n");
 
     while (1) {
@@ -21,7 +49,7 @@ int main() {
             return 1;
         }
 
-        // Kullanıcıdan input al
+        // Kullanıcıdan giriş al
         if (fgets(input, MAX_INPUT, stdin) == NULL) {
             break;
         }
@@ -36,10 +64,7 @@ int main() {
         }
 
         // Komutları çalıştır
-        int ret = system(input);
-        if (ret == -1) {
-            perror("Komut yürütüleme hatası");
-        }
+        execute_command(input);
     }
 
     return 0;
